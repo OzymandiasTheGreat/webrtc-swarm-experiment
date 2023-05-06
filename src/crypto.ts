@@ -73,6 +73,17 @@ export function decrypt(message: Uint8Array, publicKey: Uint8Array, keyPair: Key
   return out
 }
 
+export function messageID(): Uint8Array {
+  const id = b4a.allocUnsafe(32)
+  sodium.randombytes_buf(id as Buffer)
+  return id
+}
+
+export function increment(id: Uint8Array): Uint8Array {
+  sodium.sodium_increment(id as Buffer)
+  return id
+}
+
 export function encryptSignal(signal: SignalData, publicKey: Uint8Array, keyPair: KeyPair): Uint8Array {
   const data = c.encode(c.json, signal as any)
   return encrypt(data, publicKey, keyPair)
