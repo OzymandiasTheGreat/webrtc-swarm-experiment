@@ -1,4 +1,5 @@
 import c, { CompactEncoding } from "compact-encoding"
+import { Capabilities } from "./constants"
 
 const Fixed24 = c.fixed(24)
 const Fixed32Array = c.array(c.fixed32)
@@ -28,50 +29,6 @@ export const EncryptedMessage: CompactEncoding<EncryptedMessage> = {
   }
 }
 
-export const Topics: CompactEncoding<Uint8Array[]> = Fixed32Array
-
-export type Handshake = {
-  capabilities: number
-  topics: Uint8Array[]
-}
-
-export const Handshake: CompactEncoding<Handshake> = {
-  preencode(state, value) {
-    c.uint8.preencode(state, value.capabilities)
-    Fixed32Array.preencode(state, value.topics)
-  },
-  encode(state, value) {
-    c.uint8.encode(state, value.capabilities)
-    Fixed32Array.encode(state, value.topics)
-  },
-  decode(state) {
-    const capabilities = c.uint8.decode(state)
-    const topics = Fixed32Array.decode(state)
-    return { capabilities, topics }
-  }
-}
-
-export type HandshakeMessage = {
-  payload: Uint8Array
-  signature: Uint8Array
-}
-
-export const HandshakeMessage: CompactEncoding<HandshakeMessage> = {
-  preencode(state, value) {
-    c.buffer.preencode(state, value.payload)
-    c.fixed64.preencode(state, value.signature)
-  },
-  encode(state, value) {
-    c.buffer.encode(state, value.payload)
-    c.fixed64.encode(state, value.signature)
-  },
-  decode(state) {
-    const payload = c.buffer.decode(state)
-    const signature = c.fixed64.decode(state)
-    return { payload, signature }
-  }
-}
-
 type GossipMessage = {
   origin: Uint8Array
   messageID: Uint8Array
@@ -98,26 +55,47 @@ const GossipMessage: CompactEncoding<GossipMessage> = {
 }
 
 export type TopicMessage = GossipMessage & {
-  payload: Uint8Array[]
+  payload: Uint8Array
   signature: Uint8Array
 }
 
 export const TopicMessage: CompactEncoding<TopicMessage> = {
   preencode(state, value) {
     GossipMessage.preencode(state, value)
-    Fixed32Array.preencode(state, value.payload)
+    c.buffer.preencode(state, value.payload)
     c.fixed64.preencode(state, value.signature)
   },
   encode(state, value) {
     GossipMessage.encode(state, value)
-    Fixed32Array.encode(state, value.payload)
+    c.buffer.encode(state, value.payload)
     c.fixed64.encode(state, value.signature)
   },
   decode(state) {
     const { origin, messageID, ttl } = GossipMessage.decode(state)
-    const payload = Fixed32Array.decode(state)
+    const payload = c.buffer.decode(state)
     const signature = c.fixed64.decode(state)
     return { origin, messageID, ttl, payload, signature }
+  }
+}
+
+export type TopicPayload = {
+  capabilities: Capabilities
+  topics: Uint8Array[]
+}
+
+export const TopicPayload: CompactEncoding<TopicPayload> = {
+  preencode(state, value) {
+    c.uint8.preencode(state, value.capabilities)
+    Fixed32Array.preencode(state, value.topics)
+  },
+  encode(state, value) {
+    c.uint8.encode(state, value.capabilities)
+    Fixed32Array.encode(state, value.topics)
+  },
+  decode(state) {
+    const capabilities = c.uint8.decode(state)
+    const topics = Fixed32Array.decode(state)
+    return { capabilities, topics }
   }
 }
 
