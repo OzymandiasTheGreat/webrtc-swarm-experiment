@@ -1,6 +1,6 @@
 import test from "brittle"
 import b4a from "b4a"
-import { BufferMap } from "../lib/buffer-map.js"
+import BufferMap from "../lib/buffer-map.js"
 
 test("Set", async (t) => {
   t.plan(2)

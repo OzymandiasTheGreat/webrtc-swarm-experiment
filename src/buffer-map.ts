@@ -1,7 +1,7 @@
 import b4a from "b4a"
 
-export class BufferMap<V> {
-  private m: Map<string, V>
+export default class BufferMap<V> {
+  protected m: Map<string, V>
 
   constructor(other?: BufferMap<V>) {
     this.m = other ? new Map([...other.m]) : new Map()
