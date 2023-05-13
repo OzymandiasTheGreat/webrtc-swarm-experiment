@@ -10,7 +10,7 @@ import { SignalData } from "simple-peer"
 
 const debug = createDebug("SWARM:GOSSIP")
 
-export class Gossip {
+export default class Gossip {
   swarm: Swarm
   protected cache = new LRU<boolean>(GOSSIP_CACHE_SIZE)
   protected messageID = messageID()
@@ -34,12 +34,11 @@ export class Gossip {
     return message.ttl <= 0
   }
 
-  // TODO
   protected forward(type: any, message: any, source: Uint8Array) {
     message = { ...message, ttl: message.ttl - 1 }
     for (const [publicKey, connection] of this.swarm.connections) {
       if (!b4a.equals(publicKey, message.origin) && !b4a.equals(publicKey, source)) {
-        ;(connection as any).send(type, message)
+        connection.send(type, message)
       }
     }
   }
@@ -70,7 +69,7 @@ export class Gossip {
       signature
     }
     for (const connection of this.swarm.connections.values()) {
-      ;(connection as any).send("announce", message)
+      connection.send("announce", message)
     }
   }
 
@@ -102,7 +101,7 @@ export class Gossip {
       payload
     }
     for (const connection of this.swarm.connections.values()) {
-      ;(connection as any).send("signal", message)
+      connection.send("signal", message)
     }
   }
 }

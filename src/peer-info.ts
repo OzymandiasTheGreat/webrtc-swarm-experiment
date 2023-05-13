@@ -59,6 +59,10 @@ export default class PeerInfo extends EventEmitter {
     this._topics.delete(topic)
   }
 
+  _setDHTInfo(info?: UrPeerInfo) {
+    this.peerInfo = info
+  }
+
   _updateTopics(topics: Uint8Array[]) {
     for (const topic of this._topics) {
       if (!topics.includes(topic)) {
