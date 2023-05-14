@@ -5,7 +5,6 @@ import Hypercore, { ProtocolStream } from "hypercore"
 import type { PeerInfo as UrPeerInfo } from "hyperswarm"
 import type nodeFetchType from "node-fetch"
 import ReadyResource from "ready-resource"
-import safetyCatch from "safety-catch"
 import SimplePeer, { Instance, SignalData } from "simple-peer"
 import type wrtcType from "wrtc"
 import BufferMap from "./buffer-map.js"
@@ -110,7 +109,6 @@ export default class RTCSwarm extends ReadyResource {
     this.fetch = fetch
 
     this.on("peer", this._onpeer.bind(this))
-    this.ready().catch(safetyCatch)
   }
 
   get publicKey(): Uint8Array {
@@ -213,7 +211,10 @@ export default class RTCSwarm extends ReadyResource {
 
     timeout = setTimeout(onreject, CONNECTION_TIMEOUT)
 
-    return defer.promise
+    return defer.promise.then((success) => {
+      if (success) this.emit("bootstrap")
+      return success
+    })
   }
 
   protected _bootstrapMaybe() {
@@ -289,7 +290,12 @@ export default class RTCSwarm extends ReadyResource {
       peer._attempts = 0
       this.connecting.delete(peer.publicKey)
       this.connections.set(peer.publicKey, connection)
-      connection.on("close", () => this._bootstrapMaybe())
+      this.peers.set(peer.publicKey, peer)
+      connection.on("close", () => {
+        this.connections.delete(peer.publicKey)
+        this.peers.delete(peer.publicKey)
+        this._bootstrapMaybe()
+      })
       this.emit("connection", connection, peer)
     }
     const retry = (err?: Error) => {
@@ -337,7 +343,12 @@ export default class RTCSwarm extends ReadyResource {
       peer._attempts = 0
       this.connecting.delete(peer.publicKey)
       this.connections.set(peer.publicKey, connection)
-      connection.on("close", () => this._bootstrapMaybe())
+      this.peers.set(peer.publicKey, peer)
+      connection.on("close", () => {
+        this.connections.delete(peer.publicKey)
+        this.peers.delete(peer.publicKey)
+        this._bootstrapMaybe()
+      })
       this.emit("connection", connection, peer)
     }
     const onerror = (err?: Error) => {
@@ -448,24 +459,28 @@ export default class RTCSwarm extends ReadyResource {
 
   emit(event: "peer", peer: PeerInfo): boolean
   emit(event: "connection", connection: Connection, peer: PeerInfo): boolean
+  emit(event: "bootstrap"): boolean
   emit(event: string, ...args: any[]): boolean {
     return super.emit(event, ...args)
   }
 
   on(event: "peer", listener: (peer: PeerInfo) => void): this
   on(event: "connection", listener: (connection: Connection, peer: PeerInfo) => void): this
+  on(event: "bootstrap", listener: () => void): this
   on(event: string, listener: (...args: any[]) => void): this {
     return super.on(event, listener)
   }
 
   once(event: "peer", listener: (peer: PeerInfo) => void): this
   once(event: "connection", listener: (connection: Connection, peer: PeerInfo) => void): this
+  once(event: "bootstrap", listener: () => void): this
   once(event: string, listener: (...args: any[]) => void): this {
     return super.once(event, listener)
   }
 
   off(event: "peer", listener: (peer: PeerInfo) => void): this
   off(event: "connection", listener: (connection: Connection, peer: PeerInfo) => void): this
+  off(event: "bootstrap", listener: () => void): this
   off(event: string, listener: (...args: any[]) => void): this {
     return super.off(event, listener)
   }

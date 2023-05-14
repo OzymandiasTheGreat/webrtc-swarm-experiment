@@ -23,10 +23,12 @@ export default class PeerDiscovery {
 
   async refresh() {
     if (this.destroyed) throw new Error("PeerDiscovery is destroyed")
+    await this.swarm.ready()
     this.swarm.gossip.announce()
   }
 
   async flushed(): Promise<boolean> {
+    await this.swarm.ready()
     return this.swarm.flush()
   }
 

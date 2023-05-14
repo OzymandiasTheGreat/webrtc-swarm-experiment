@@ -23,7 +23,8 @@
     "safety-catch": "^1.0.2",
     "simple-peer": "^9.11.1",
     "sodium-universal": "^4.0.0",
-    "streamx": "^2.13.2"
+    "streamx": "^2.13.2",
+    "wrtc": "npm:@koush/wrtc"
   },
   "devDependencies": {
     "@screamingvoid/types": "*",
