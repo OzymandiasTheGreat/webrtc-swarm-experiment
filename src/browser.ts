@@ -18,6 +18,7 @@ import {
   ConnectionType,
   FLUSH_TIMEOUT,
   JITTER,
+  MAX_ATTEMPTS,
   MAX_PARALLEL,
   MAX_PEERS,
   RETRY_TIMEOUT
@@ -108,6 +109,7 @@ export default class RTCSwarm extends ReadyResource {
     this.wrtc = wrtc
     this.fetch = fetch
 
+    this.on("peer", this._onpeer.bind(this))
     this.ready().catch(safetyCatch)
   }
 
@@ -136,7 +138,24 @@ export default class RTCSwarm extends ReadyResource {
   }
 
   protected async _open(): Promise<void> {
+    await this._bootstrapMaybe()
     this._announce()
+  }
+
+  protected async _close(): Promise<void> {
+    if (this.timer) clearTimeout(this.timer)
+    for (const socket of this.connecting.values()) {
+      socket.destroy()
+    }
+    for (const connection of this.connections.values()) {
+      if (connection.type === ConnectionType.RTC) {
+        connection.destroy()
+      }
+    }
+    for (const discovery of this._discovery.values()) {
+      await discovery.destroy()
+    }
+    this.peers.clear()
   }
 
   protected async _bootstrap(bootstrap: Bootstrap): Promise<boolean> {
@@ -184,7 +203,7 @@ export default class RTCSwarm extends ReadyResource {
 
     socket = new SimplePeer({ initiator: true, trickle: false, wrtc: this.wrtc as any })
     socket.on("signal", onsignal)
-    socket.on("error", onreject)
+    socket.once("error", onreject)
     socket.on("connect", onconnect)
     this.connecting.set(bootstrap.publicKey, socket)
 
@@ -231,13 +250,110 @@ export default class RTCSwarm extends ReadyResource {
     }, ANNOUNCE_INTERVAL + randint(0, JITTER))
   }
 
-  protected _shouldConnect(peer: PeerInfo): boolean {}
+  protected _shouldConnect(peer: PeerInfo): boolean {
+    const firewall = this.firewall(peer.publicKey)
+    const hasRTC = !!(peer.capabilities & Capabilities.RTC)
+    const count = [...this.connections.values()].reduce((a, i) => a + (i.type === ConnectionType.RTC ? 1 : 0), 0)
+    const connecting = this.connecting.has(peer.publicKey)
+    const connected = this.connections.has(peer.publicKey)
+    const overlap = peer._hasOverlappingTopics
+    debug("Should connect %O", { firewall, hasRTC, count, connecting, connected, overlap })
+    return !firewall && hasRTC && count < this.maxRTCPeers && !connecting && !connected && overlap
+  }
 
-  protected _shouldAccept(peer: PeerInfo): boolean {}
+  protected connect(peer: PeerInfo) {
+    if (!this._shouldConnect(peer)) return
+    peer.client = true
+    let socket: Instance
+    let timeout: any
 
-  protected _onpeerjoin(peer: PeerInfo) {}
+    const onsignal = (signal: SignalData) =>
+      this.gossip.signal(peer.publicKey, {
+        capabilities: this.capabilities,
+        topics: [...this._discovery.keys()],
+        signal
+      })
+    const onconnect = () => {
+      clearTimeout(timeout)
+      const connection = new Connection(peer.publicKey, true, ConnectionType.RTC, socket, this)
+      peer._attempts = 0
+      this.connecting.delete(peer.publicKey)
+      this.connections.set(peer.publicKey, connection)
+      connection.on("close", () => this._bootstrapMaybe())
+      this.emit("connection", connection, peer)
+    }
+    const retry = (err?: Error) => {
+      peer._attempts++
+      timeout = setTimeout(() => {
+        clearTimeout(timeout)
+        this.connecting.delete(peer.publicKey)
+        socket.destroy()
+        if (!this.connections.has(peer.publicKey) && peer.attempts < MAX_ATTEMPTS) {
+          this.connect(peer)
+        }
+      }, CONNECTION_TIMEOUT + randint(0, JITTER))
+    }
 
-  _onsignal(publicKey: Uint8Array, signal: SignalData) {}
+    socket = new SimplePeer({ initiator: true, trickle: false, wrtc: this.wrtc as any })
+    socket.on("signal", onsignal)
+    socket.once("error", retry)
+    socket.on("connect", onconnect)
+    this.connecting.set(peer.publicKey, socket)
+
+    retry()
+  }
+
+  protected accept(peer: PeerInfo, signal: SignalData) {
+    if (!this._shouldConnect(peer)) return
+    peer.client = false
+    let socket: Instance
+    let timeout: any
+
+    const onsignal = (signal: SignalData) =>
+      this.gossip.signal(peer.publicKey, {
+        capabilities: this.capabilities,
+        topics: [...this._discovery.keys()],
+        signal
+      })
+    const onconnect = () => {
+      clearTimeout(timeout)
+      const connection = new Connection(peer.publicKey, false, ConnectionType.RTC, socket, this)
+      peer._attempts = 0
+      this.connecting.delete(peer.publicKey)
+      this.connections.set(peer.publicKey, connection)
+      connection.on("close", () => this._bootstrapMaybe())
+      this.emit("connection", connection, peer)
+    }
+    const onerror = (err?: Error) => {
+      peer._attempts++
+      clearTimeout(timeout)
+      this.connecting.delete(peer.publicKey)
+      socket.destroy()
+    }
+
+    socket = new SimplePeer({ trickle: false, wrtc: this.wrtc as any })
+    socket.on("signal", onsignal)
+    socket.on("error", onerror)
+    socket.on("connect", onconnect)
+    this.connecting.set(peer.publicKey, socket)
+
+    timeout = setTimeout(onerror, CONNECTION_TIMEOUT + randint(0, JITTER))
+  }
+
+  protected _onpeer(peer: PeerInfo) {
+    this.connect(peer)
+    peer.on("topic", () => {
+      this.connect(peer)
+    })
+  }
+
+  _onsignal(peer: PeerInfo, signal: SignalData) {
+    if (this.connecting.has(peer.publicKey)) {
+      this.connecting.get(peer.publicKey)?.signal(signal)
+    } else {
+      this.accept(peer, signal)
+    }
+  }
 
   protected async _flush(): Promise<boolean> {
     let connections = 0

@@ -5,8 +5,7 @@ import LRU from "lru"
 import type Swarm from "./browser.js"
 import { GOSSIP_CACHE_SIZE, TTL } from "./constants.js"
 import { decryptSignal, encryptSignal, increment, messageID, sign, verify } from "./crypto.js"
-import { SignalMessage, TopicMessage, TopicPayload } from "./messages.js"
-import { SignalData } from "simple-peer"
+import { SignalMessage, SignalPayload, TopicMessage, TopicPayload } from "./messages.js"
 
 const debug = createDebug("SWARM:GOSSIP")
 
@@ -79,8 +78,9 @@ export default class Gossip {
 
     if (b4a.equals(message.target, this.swarm.publicKey)) {
       try {
-        const signal = decryptSignal(message.payload, message.origin, this.swarm.keyPair)
-        this.swarm._onsignal(message.origin, signal)
+        const { capabilities, topics, signal } = decryptSignal(message.payload, message.origin, this.swarm.keyPair)
+        const peer = this.swarm._upsertPeer(message.origin, capabilities, topics)
+        this.swarm._onsignal(peer, signal)
         return
       } catch {
         return
@@ -91,8 +91,8 @@ export default class Gossip {
     this.forward("signal", message, source)
   }
 
-  signal(target: Uint8Array, signal: SignalData) {
-    const payload = encryptSignal(signal, target, this.swarm.keyPair)
+  signal(target: Uint8Array, data: SignalPayload) {
+    const payload = encryptSignal(data, target, this.swarm.keyPair)
     const message: SignalMessage = {
       origin: this.swarm.publicKey,
       messageID: increment(this.messageID),

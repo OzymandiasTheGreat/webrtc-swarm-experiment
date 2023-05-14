@@ -82,4 +82,19 @@ export default class PeerInfo extends EventEmitter {
     }
     return false
   }
+
+  on(event: "topic", listener: (topic: Uint8Array) => void): this
+  on(event: string, listener: (...args: any[]) => void): this {
+    return super.on(event, listener)
+  }
+
+  once(event: "topic", listener: (topic: Uint8Array) => void): this
+  once(event: string, listener: (...args: any[]) => void): this {
+    return super.once(event, listener)
+  }
+
+  off(event: "topic", listener: (topic: Uint8Array) => void): this
+  off(event: string, listener: (...args: any[]) => void): this {
+    return super.off(event, listener)
+  }
 }

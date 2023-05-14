@@ -1,10 +1,9 @@
 import type { KeyPair } from "@hyperswarm/secret-stream"
 import b4a from "b4a"
 import c from "compact-encoding"
-import type { SignalData } from "simple-peer"
 import sodium from "sodium-universal"
 import { AuthenticationFailed } from "./errors.js"
-import { EncryptedMessage } from "./messages.js"
+import { EncryptedMessage, SignalPayload } from "./messages.js"
 
 export function keyPair(seed?: Uint8Array): KeyPair {
   const publicKey = b4a.allocUnsafe(sodium.crypto_sign_PUBLICKEYBYTES)
@@ -84,12 +83,12 @@ export function increment(id: Uint8Array): Uint8Array {
   return id
 }
 
-export function encryptSignal(signal: SignalData, publicKey: Uint8Array, keyPair: KeyPair): Uint8Array {
-  const data = c.encode(c.json, signal as any)
+export function encryptSignal(payload: SignalPayload, publicKey: Uint8Array, keyPair: KeyPair): Uint8Array {
+  const data = c.encode(SignalPayload, payload)
   return encrypt(data, publicKey, keyPair)
 }
 
-export function decryptSignal(data: Uint8Array, publicKey: Uint8Array, keyPair: KeyPair): SignalData {
-  const signal = decrypt(data, publicKey, keyPair)
-  return c.decode(c.json, signal) as SignalData
+export function decryptSignal(data: Uint8Array, publicKey: Uint8Array, keyPair: KeyPair): SignalPayload {
+  const payload = decrypt(data, publicKey, keyPair)
+  return c.decode(SignalPayload, payload)
 }

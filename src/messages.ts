@@ -1,5 +1,6 @@
 import c, { CompactEncoding } from "compact-encoding"
-import { Capabilities } from "./constants"
+import type { Capabilities } from "./constants"
+import type { SignalData } from "simple-peer"
 
 const Fixed24 = c.fixed(24)
 const Fixed32Array = c.array(c.fixed32)
@@ -120,5 +121,25 @@ export const SignalMessage: CompactEncoding<SignalMessage> = {
     const target = c.fixed32.decode(state)
     const payload = c.buffer.decode(state)
     return { origin, messageID, ttl, target, payload }
+  }
+}
+
+export type SignalPayload = TopicPayload & {
+  signal: SignalData
+}
+
+export const SignalPayload: CompactEncoding<SignalPayload> = {
+  preencode(state, value) {
+    TopicPayload.preencode(state, value)
+    c.json.preencode(state, value.signal as any)
+  },
+  encode(state, value) {
+    TopicPayload.encode(state, value)
+    c.json.encode(state, value.signal as any)
+  },
+  decode(state) {
+    const { capabilities, topics } = TopicPayload.decode(state)
+    const signal = c.json.decode(state) as SignalData
+    return { capabilities, topics, signal }
   }
 }
