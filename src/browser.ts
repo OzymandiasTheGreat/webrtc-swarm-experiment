@@ -121,6 +121,10 @@ export default class RTCSwarm extends ReadyResource {
     return Capabilities.RTC
   }
 
+  get destroyed(): boolean {
+    return this.closed
+  }
+
   _upsertPeer(publicKey: Uint8Array, capabilities: Capabilities, topics: Uint8Array[], info?: UrPeerInfo): PeerInfo {
     let peer = this.peerCache.get(publicKey)?.deref()
     if (!peer) {
@@ -263,6 +267,12 @@ export default class RTCSwarm extends ReadyResource {
 
   protected connect(peer: PeerInfo) {
     if (!this._shouldConnect(peer)) return
+    if (this.connecting.size >= MAX_PARALLEL) {
+      const parallel = setTimeout(() => {
+        clearTimeout(parallel)
+        this.connect(peer)
+      }, CONNECTION_TIMEOUT)
+    }
     peer.client = true
     let socket: Instance
     let timeout: any
@@ -305,6 +315,12 @@ export default class RTCSwarm extends ReadyResource {
 
   protected accept(peer: PeerInfo, signal: SignalData) {
     if (!this._shouldConnect(peer)) return
+    if (this.connecting.size >= MAX_PARALLEL) {
+      const parallel = setTimeout(() => {
+        clearTimeout(parallel)
+        this.accept(peer, signal)
+      }, CONNECTION_TIMEOUT)
+    }
     peer.client = false
     let socket: Instance
     let timeout: any
@@ -389,8 +405,30 @@ export default class RTCSwarm extends ReadyResource {
     return Promise.resolve(false)
   }
 
+  status(topic: Uint8Array): PeerDiscovery | undefined {
+    return this._discovery.get(topic)
+  }
+
+  listen() {
+    return this.ready()
+  }
+
   async flush(): Promise<boolean> {
     return this._flushMaybe()
+  }
+
+  async clear(): Promise<PromiseSettledResult<void>[]> {
+    const cleared = await Promise.allSettled([...this._discovery.values()].map((d) => d.destroy()))
+    this._discovery.clear()
+    return cleared
+  }
+
+  destroy() {
+    return this.close()
+  }
+
+  topics() {
+    return this._discovery.values()
   }
 
   join(topic: Uint8Array, options?: any): PeerDiscoverySession {
