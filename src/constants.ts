@@ -13,9 +13,11 @@ export enum ConnectionType {
 }
 
 export const ANNOUNCE_INTERVAL = 15 * 60 * 1000
+export const CONNECTION_TIMEOUT = 30 * 1000
 export const FLUSH_TIMEOUT = 30 * 1000
 export const GOSSIP_CACHE_SIZE = 255
 export const JITTER = 2 * 60 * 1000
 export const MAX_PARALLEL = 5
 export const MAX_PEERS = 64
+export const RETRY_TIMEOUT = 5 * 60 * 1000
 export const TTL = 255

@@ -3,7 +3,8 @@
   "compilerOptions": {
     "declaration": true,
     "emitDeclarationOnly": true,
-    "declarationDir": "types"
+    "declarationDir": "types",
+    "lib": ["DOM", "ES2021.WeakRef"]
   },
   "include": ["./src"]
 }

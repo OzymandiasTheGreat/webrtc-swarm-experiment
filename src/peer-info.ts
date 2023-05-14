@@ -76,7 +76,7 @@ export default class PeerInfo extends EventEmitter {
 
   get _hasOverlappingTopics(): boolean {
     for (const topic of this._topics) {
-      if (this.swarm.topics.has(topic)) {
+      if (this.swarm._discovery.has(topic)) {
         return true
       }
     }

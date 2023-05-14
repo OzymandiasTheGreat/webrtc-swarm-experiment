@@ -58,7 +58,7 @@ export default class Gossip {
   announce() {
     const payload = c.encode(TopicPayload, {
       capabilities: this.swarm.capabilities,
-      topics: [...this.swarm.topics]
+      topics: [...this.swarm._discovery.keys()]
     })
     const signature = sign(payload, this.swarm.keyPair.secretKey)
     const message: TopicMessage = {
