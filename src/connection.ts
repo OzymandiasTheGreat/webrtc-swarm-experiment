@@ -5,7 +5,7 @@ import type { ProtomuxMessage } from "protomux"
 import type { Instance } from "simple-peer"
 import { Duplex } from "streamx"
 import type Swarm from "./browser.js"
-import { ConnectionType, PROTOCOL } from "./constants"
+import { ConnectionType, PROTOCOL } from "./constants.js"
 import { SignalMessage, TopicMessage } from "./messages.js"
 
 export default class Connection extends Duplex {

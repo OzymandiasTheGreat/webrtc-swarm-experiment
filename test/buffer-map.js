@@ -12,6 +12,19 @@ test("Set", async (t) => {
   t.absent(res)
 })
 
+test("Set update", async (t) => {
+  t.plan(4)
+
+  const map = new BufferMap()
+  const key = b4a.from("A")
+  let res = map.set(key, 1, false)
+  t.ok(res)
+  t.is(map.get(key), 1)
+  res = map.set(key, 2, false)
+  t.absent(res)
+  t.is(map.get(key), 1)
+})
+
 test("Get", async (t) => {
   t.plan(3)
 

@@ -125,21 +125,25 @@ export const SignalMessage: CompactEncoding<SignalMessage> = {
 }
 
 export type SignalPayload = TopicPayload & {
+  initiator: boolean
   signal: SignalData
 }
 
 export const SignalPayload: CompactEncoding<SignalPayload> = {
   preencode(state, value) {
     TopicPayload.preencode(state, value)
+    c.bool.preencode(state, value.initiator)
     c.json.preencode(state, value.signal as any)
   },
   encode(state, value) {
     TopicPayload.encode(state, value)
+    c.bool.encode(state, value.initiator)
     c.json.encode(state, value.signal as any)
   },
   decode(state) {
     const { capabilities, topics } = TopicPayload.decode(state)
+    const initiator = c.bool.decode(state)
     const signal = c.json.decode(state) as SignalData
-    return { capabilities, topics, signal }
+    return { capabilities, topics, initiator, signal }
   }
 }

@@ -1,7 +1,7 @@
 import type { KeyPair } from "@hyperswarm/secret-stream"
 import b4a from "b4a"
 import c from "compact-encoding"
-import sodium from "sodium-universal"
+import sodium from "sodium-native"
 import { AuthenticationFailed } from "./errors.js"
 import { EncryptedMessage, SignalPayload } from "./messages.js"
 

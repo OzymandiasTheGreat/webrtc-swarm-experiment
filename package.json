@@ -22,17 +22,18 @@
     "ready-resource": "^1.0.0",
     "safety-catch": "^1.0.2",
     "simple-peer": "^9.11.1",
-    "sodium-universal": "^4.0.0",
+    "sodium-native": "npm:sodium-universal",
     "streamx": "^2.13.2",
     "wrtc": "npm:@koush/wrtc"
   },
   "devDependencies": {
-    "@screamingvoid/types": "*",
+    "@screamingvoid/types": "^0.1.8",
     "@swc/cli": "^0.1.62",
     "@swc/core": "^1.3.56",
     "@types/debug": "^4.1.7",
     "@types/simple-peer": "^9.11.5",
     "brittle": "^3.2.1",
+    "node-fetch": "^3.3.1",
     "typescript": "^5.0.4"
   }
 }

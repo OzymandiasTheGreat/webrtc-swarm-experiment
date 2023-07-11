@@ -1,12 +1,16 @@
 import b4a from "b4a"
+import createDebug from "debug"
 import { createServer, IncomingMessage, Server, ServerResponse } from "http"
+import type { AddressInfo } from "net"
 import SimplePeer, { SignalData } from "simple-peer"
 import nodewrtc from "wrtc"
-import RTCSwarm, { RTCSwarmOptions } from "./browser"
-import { Capabilities, CONNECTION_TIMEOUT, ConnectionType, MAX_PARALLEL } from "./constants"
-import { Defer } from "./util"
-import Connection from "./connection"
-import PeerInfo from "./peer-info"
+import RTCSwarm, { Bootstrap as BootstrapNode, RTCSwarmOptions } from "./browser.js"
+import { Capabilities, CONNECTION_TIMEOUT, ConnectionType, MAX_PARALLEL } from "./constants.js"
+import { Defer } from "./util.js"
+import Connection from "./connection.js"
+import type PeerInfo from "./peer-info.js"
+
+const debug = createDebug("SWARM:BOOTSTRAP")
 
 type RTCConnectionRequest = { publicKey: string; signal: SignalData }
 
@@ -53,14 +57,27 @@ export default class Bootstrap extends RTCSwarm {
     return Capabilities.FULL
   }
 
-  get address() {
-    return this.server?.address()
+  get address(): AddressInfo | null {
+    return this.server?.address() as AddressInfo
+  }
+
+  get bootstrap(): BootstrapNode {
+    return {
+      publicKey: this.publicKey,
+      host: this.address?.address!,
+      port: this.address?.port!,
+      ssl: false
+    }
   }
 
   protected async _open(): Promise<void> {
     const listening = new Defer<void>()
     this.server = createServer(async (req, res) => {
-      const request = await parseRequest(req).catch((err) => err.message)
+      debug("New request from %o", req.socket.remoteAddress)
+      const request = await parseRequest(req).catch((err) => {
+        debug("Request invalid %o", err)
+        return err.message
+      })
       if (!request || typeof request === "string") {
         res.writeHead(500)
         res.end(request ?? "Unknown Error")
@@ -90,10 +107,12 @@ export default class Bootstrap extends RTCSwarm {
   }
 
   protected async onrequest(publicKey: Uint8Array, signal: SignalData, res: ServerResponse) {
+    debug("Connecting to peer %s", b4a.toString(publicKey, "hex"))
     let timeout: any
     let socket = this.connecting.get(publicKey)
 
-    const onerror = () => {
+    const onerror = (err?: Error) => {
+      debug("Socket error %o", err)
       clearTimeout(timeout)
       this.connecting.delete(publicKey)
       socket?.destroy()
@@ -104,13 +123,17 @@ export default class Bootstrap extends RTCSwarm {
       res.end(JSON.stringify(data))
     }
     const onconnect = () => {
+      debug("Connected %s", b4a.toString(publicKey, "hex"))
       clearTimeout(timeout)
       const connection = new Connection(publicKey, false, ConnectionType.RTC, socket!, this)
-      this.connecting.delete(publicKey)
-      this.connections.set(publicKey, connection)
-      this.emit("connection", connection, this._upsertPeer(publicKey, Capabilities.RTC, []))
+      connection.on("open", () => {
+        this.connecting.delete(publicKey)
+        this.connections.set(publicKey, connection)
+        this.emit("connection", connection, this._upsertPeer(publicKey, Capabilities.RTC, []))
+      })
     }
 
+    if (socket?.connected) return onconnect()
     if (!socket) {
       socket = new SimplePeer({ trickle: false, wrtc: this.wrtc as any })
       socket.on("connect", onconnect)
@@ -121,7 +144,10 @@ export default class Bootstrap extends RTCSwarm {
     socket.once("signal", onsignal)
     socket.signal(signal)
 
-    timeout = setTimeout(onerror, CONNECTION_TIMEOUT)
+    timeout = setTimeout(() => {
+      if (socket?.connected) return onconnect()
+      onerror(new Error("Connection timed out"))
+    }, CONNECTION_TIMEOUT)
   }
 
   protected _shouldConnect(peer: PeerInfo): boolean {
@@ -129,9 +155,11 @@ export default class Bootstrap extends RTCSwarm {
   }
 
   protected _shouldAccept(publicKey: Uint8Array): boolean {
+    if (this.connecting.has(publicKey)) return true
     const firewall = this.firewall(publicKey)
     const count = [...this.connections.values()].reduce((a, i) => a + (i.type === ConnectionType.RTC ? 1 : 0), 0)
     const connected = this.connections.has(publicKey)
-    return !firewall && count < this.maxRTCPeers && !connected
+    const parallel = this.connecting.size < MAX_PARALLEL
+    return !firewall && count < this.maxRTCPeers && !connected && parallel
   }
 }

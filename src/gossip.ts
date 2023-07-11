@@ -78,12 +78,10 @@ export default class Gossip {
 
     if (b4a.equals(message.target, this.swarm.publicKey)) {
       try {
-        const { capabilities, topics, signal } = decryptSignal(message.payload, message.origin, this.swarm.keyPair)
-        const peer = this.swarm._upsertPeer(message.origin, capabilities, topics)
-        this.swarm._onsignal(peer, signal)
-        return
-      } catch {
-        return
+        const { capabilities, topics, initiator, signal } = decryptSignal(message.payload, message.origin, this.swarm.keyPair)
+        this.swarm.onsignal(message.origin, capabilities, topics, !initiator, signal)
+      } catch (err) {
+        return debug("Signal error from %s %o", b4a.toString(message.origin, "hex"), err)
       }
     }
 
@@ -92,6 +90,7 @@ export default class Gossip {
   }
 
   signal(target: Uint8Array, data: SignalPayload) {
+    debug("Sending signal to %s %s", b4a.toString(target, "hex"), data.signal.type)
     const payload = encryptSignal(data, target, this.swarm.keyPair)
     const message: SignalMessage = {
       origin: this.swarm.publicKey,

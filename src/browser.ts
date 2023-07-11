@@ -21,7 +21,7 @@ import {
   MAX_PARALLEL,
   MAX_PEERS,
   RETRY_TIMEOUT
-} from "./constants"
+} from "./constants.js"
 import { keyPair as genKeyPair } from "./crypto.js"
 import Gossip from "./gossip.js"
 import PeerDiscovery, { PeerDiscoverySession } from "./peer-discovery.js"
@@ -73,6 +73,7 @@ export default class RTCSwarm extends ReadyResource {
   bootstraps: Bootstrap[]
 
   connections = new BufferMap<Connection>()
+  connecting = new BufferMap<Instance>()
   peers = new BufferMap<PeerInfo>()
   banned = new BufferSet()
   gossip = new Gossip(this)
@@ -82,7 +83,6 @@ export default class RTCSwarm extends ReadyResource {
   protected fetch: fetchType
   protected timer: any
   protected peerCache = new BufferMap<WeakRef<PeerInfo>>()
-  protected connecting = new BufferMap<Instance>()
 
   constructor(options: RTCSwarmOptions = {}) {
     super()
@@ -107,8 +107,6 @@ export default class RTCSwarm extends ReadyResource {
     this.bootstraps = bootstraps
     this.wrtc = wrtc
     this.fetch = fetch
-
-    this.on("peer", this._onpeer.bind(this))
   }
 
   get publicKey(): Uint8Array {
@@ -124,9 +122,14 @@ export default class RTCSwarm extends ReadyResource {
   }
 
   _upsertPeer(publicKey: Uint8Array, capabilities: Capabilities, topics: Uint8Array[], info?: UrPeerInfo): PeerInfo {
-    let peer = this.peerCache.get(publicKey)?.deref()
+    let peer = this.peers.get(publicKey) ?? this.peerCache.get(publicKey)?.deref()
     if (!peer) {
+      debug("New peer %s topics %d", b4a.toString(publicKey, "hex"), topics.length)
       peer = new PeerInfo(publicKey, capabilities, this)
+      // Only eagerly connect to some peers, the rest will eagerly connect to us
+      if (![this.publicKey, peer.publicKey].sort(b4a.compare).indexOf(this.publicKey)) {
+        peer.on("topic", () => this.connect(peer!))
+      }
       this.peerCache.set(publicKey, new WeakRef(peer))
       this.emit("peer", peer)
     }
@@ -137,6 +140,12 @@ export default class RTCSwarm extends ReadyResource {
 
   _selectPeer(publicKey: Uint8Array): PeerInfo | null {
     return this.peerCache.get(publicKey)?.deref() ?? null
+  }
+
+  protected _promotePeer(peer: PeerInfo): boolean {
+    if (!this.peers.set(peer.publicKey, peer, false)) return false
+    if (this.peers.get(peer.publicKey) !== peer) return false
+    return true
   }
 
   protected async _open(): Promise<void> {
@@ -198,9 +207,11 @@ export default class RTCSwarm extends ReadyResource {
       clearTimeout(timeout)
       const connection = new Connection(bootstrap.publicKey, true, ConnectionType.RTC, socket, this)
       connection.on("close", () => this._bootstrapMaybe())
-      this.connections.set(bootstrap.publicKey, connection)
-      this.connecting.delete(bootstrap.publicKey)
-      defer.resolve(true)
+      connection.on("open", () => {
+        this.connections.set(bootstrap.publicKey, connection)
+        this.connecting.delete(bootstrap.publicKey)
+        defer.resolve(true)
+      })
     }
 
     socket = new SimplePeer({ initiator: true, trickle: false, wrtc: this.wrtc as any })
@@ -218,7 +229,14 @@ export default class RTCSwarm extends ReadyResource {
   }
 
   protected _bootstrapMaybe() {
-    if (this.connections.size < 3 && ![...this.connections.keys()].some((c) => !!this.bootstraps.find((b) => b4a.equals(c, b.publicKey)))) {
+    const bootstrapped = this.bootstraps.some(({ publicKey }) =>
+      [...this.connections.values()].some((c) => b4a.equals(c.remotePublicKey, publicKey))
+    )
+    if (
+      !bootstrapped &&
+      this.connections.size < 3 &&
+      ![...this.connections.keys()].some((c) => !!this.bootstraps.find((b) => b4a.equals(c, b.publicKey)))
+    ) {
       debug("Bootstrapping...")
       if (!this.bootstraps.length) return Promise.reject()
       const promises: Promise<boolean>[] = []
@@ -255,26 +273,31 @@ export default class RTCSwarm extends ReadyResource {
     }, ANNOUNCE_INTERVAL + randint(0, JITTER))
   }
 
-  protected _shouldConnect(peer: PeerInfo): boolean {
+  protected _shouldConnect(peer?: PeerInfo): boolean {
+    if (!peer) return false
     const firewall = this.firewall(peer.publicKey)
     const hasRTC = !!(peer.capabilities & Capabilities.RTC)
     const count = [...this.connections.values()].reduce((a, i) => a + (i.type === ConnectionType.RTC ? 1 : 0), 0)
     const connecting = this.connecting.has(peer.publicKey)
     const connected = this.connections.has(peer.publicKey)
     const overlap = peer._hasOverlappingTopics
-    debug("Should connect %O", { firewall, hasRTC, count, connecting, connected, overlap })
-    return !firewall && hasRTC && count < this.maxRTCPeers && !connecting && !connected && overlap
+    const connect = !firewall && hasRTC && count < this.maxRTCPeers && !connecting && !connected && overlap
+    return connect
   }
 
   protected connect(peer: PeerInfo) {
-    if (!this._shouldConnect(peer)) return
+    if (!this._shouldConnect(peer) || !this._promotePeer(peer)) return
+    peer.client = true
+
+    let parallel: any
     if (this.connecting.size >= MAX_PARALLEL) {
-      const parallel = setTimeout(() => {
-        clearTimeout(parallel)
+      parallel = setTimeout(() => {
+        clearTimeout(parallel!)
         this.connect(peer)
       }, CONNECTION_TIMEOUT)
+      return
     }
-    peer.client = true
+
     let socket: Instance
     let timeout: any
 
@@ -282,21 +305,23 @@ export default class RTCSwarm extends ReadyResource {
       this.gossip.signal(peer.publicKey, {
         capabilities: this.capabilities,
         topics: [...this._discovery.keys()],
+        initiator: true,
         signal
       })
     const onconnect = () => {
       clearTimeout(timeout)
       const connection = new Connection(peer.publicKey, true, ConnectionType.RTC, socket, this)
       peer._attempts = 0
-      this.connecting.delete(peer.publicKey)
-      this.connections.set(peer.publicKey, connection)
-      this.peers.set(peer.publicKey, peer)
       connection.on("close", () => {
         this.connections.delete(peer.publicKey)
         this.peers.delete(peer.publicKey)
         this._bootstrapMaybe()
       })
-      this.emit("connection", connection, peer)
+      connection.on("open", () => {
+        this.connecting.delete(peer.publicKey)
+        this.connections.set(peer.publicKey, connection)
+        this.emit("connection", connection, peer)
+      })
     }
     const retry = (err?: Error) => {
       peer._attempts++
@@ -314,19 +339,18 @@ export default class RTCSwarm extends ReadyResource {
     socket.on("signal", onsignal)
     socket.once("error", retry)
     socket.on("connect", onconnect)
-    this.connecting.set(peer.publicKey, socket)
+    if (!this.connecting.set(peer.publicKey, socket, false)) {
+      this.connecting.delete(peer.publicKey)
+      socket.destroy()
+    }
 
     retry()
   }
 
   protected accept(peer: PeerInfo, signal: SignalData) {
-    if (!this._shouldConnect(peer)) return
-    if (this.connecting.size >= MAX_PARALLEL) {
-      const parallel = setTimeout(() => {
-        clearTimeout(parallel)
-        this.accept(peer, signal)
-      }, CONNECTION_TIMEOUT)
-    }
+    if (!this._shouldConnect(peer) || !this._promotePeer(peer)) return
+    if (this.connecting.size >= MAX_PARALLEL) return
+    debug("Accepting peer %s", b4a.toString(peer.publicKey, "hex"))
     peer.client = false
     let socket: Instance
     let timeout: any
@@ -335,21 +359,23 @@ export default class RTCSwarm extends ReadyResource {
       this.gossip.signal(peer.publicKey, {
         capabilities: this.capabilities,
         topics: [...this._discovery.keys()],
+        initiator: false,
         signal
       })
     const onconnect = () => {
       clearTimeout(timeout)
       const connection = new Connection(peer.publicKey, false, ConnectionType.RTC, socket, this)
       peer._attempts = 0
-      this.connecting.delete(peer.publicKey)
-      this.connections.set(peer.publicKey, connection)
-      this.peers.set(peer.publicKey, peer)
       connection.on("close", () => {
         this.connections.delete(peer.publicKey)
         this.peers.delete(peer.publicKey)
         this._bootstrapMaybe()
       })
-      this.emit("connection", connection, peer)
+      connection.on("open", () => {
+        this.connecting.delete(peer.publicKey)
+        this.connections.set(peer.publicKey, connection)
+        this.emit("connection", connection, peer)
+      })
     }
     const onerror = (err?: Error) => {
       peer._attempts++
@@ -361,25 +387,22 @@ export default class RTCSwarm extends ReadyResource {
     socket = new SimplePeer({ trickle: false, wrtc: this.wrtc as any })
     socket.on("signal", onsignal)
     socket.on("error", onerror)
-    socket.on("connect", onconnect)
-    this.connecting.set(peer.publicKey, socket)
-
-    timeout = setTimeout(onerror, CONNECTION_TIMEOUT + randint(0, JITTER))
-  }
-
-  protected _onpeer(peer: PeerInfo) {
-    this.connect(peer)
-    peer.on("topic", () => {
-      this.connect(peer)
-    })
-  }
-
-  _onsignal(peer: PeerInfo, signal: SignalData) {
-    if (this.connecting.has(peer.publicKey)) {
-      this.connecting.get(peer.publicKey)?.signal(signal)
+    if (this.connecting.set(peer.publicKey, socket, false)) {
+      timeout = setTimeout(onerror, CONNECTION_TIMEOUT + randint(0, JITTER))
+      socket.on("connect", onconnect)
+      socket.signal(signal)
     } else {
-      this.accept(peer, signal)
+      debug("Already connecting to %s", b4a.toString(peer.publicKey, "hex"))
+      socket.destroy()
     }
+  }
+
+  onsignal(publicKey: Uint8Array, capabilities: Capabilities, topics: Uint8Array[], isInitiator: boolean, signal: SignalData) {
+    const socket = this.connecting.get(publicKey)
+    debug("Signal from %s socket %o initiator %o", b4a.toString(publicKey, "hex"), !!socket, isInitiator)
+    if (socket) return socket.signal(signal)
+    if (!isInitiator) return this.accept(this._upsertPeer(publicKey, capabilities, topics), signal)
+    throw new Error("Unhandled signal")
   }
 
   protected async _flush(): Promise<boolean> {

@@ -16,11 +16,12 @@ export default class BufferMap<V> {
     return this.m.get(key)
   }
 
-  set(key: string | Uint8Array, value: V): boolean {
+  set(key: string | Uint8Array, value: V, update = true): boolean {
     if (b4a.isBuffer(key)) key = b4a.toString(key, "hex")
-    const added = !this.m.has(key)
+    const exists = this.m.has(key)
+    if (exists && !update) return !exists
     this.m.set(key, value)
-    return added
+    return !exists
   }
 
   delete(key: string | Uint8Array): boolean {
